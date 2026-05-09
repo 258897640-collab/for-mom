@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Happy Mother's Day</title>
+<style>
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<script>
+(function() {
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+
+  let W, H, dpr;
+  let particles = [];
+  let isPressed = false;
+  let pointerX = 0, pointerY = 0;
+  let animId;
+  let time = 0;
+
+  // 色调：粉紫金暖色系
+  const colors = [
+    { r: 255, g: 150, b: 200 }, // 粉
+    { r: 200, g: 130, b: 255 }, // 紫
+    { r: 255, g: 200, b: 100 }, // 金
+    { r: 255, g: 180, b: 150 }, // 暖橘粉
+    { r: 230, g: 160, b: 255 }, // 浅紫
+  ];
+
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    initParticles();
+  }
+
+  // 从文字中提取粒子坐标
+  function getTextPoints(text, fontSize) {
+    const offCanvas = document.createElement('canvas');
+    const offCtx = offCanvas.getContext('2d');
+    offCanvas.width = W * dpr;
+    offCanvas.height = H * dpr;
+    offCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    offCtx.fillStyle = '#fff';
+    offCtx.font = `bold ${fontSize}px "Georgia", "Times New Roman", serif`;
+    offCtx.textAlign = 'center';
+    offCtx.textBaseline = 'middle';
+
+    // 多行文字
+    const lines = text.split('\n');
+    const lineHeight = fontSize * 1.3;
+    const totalHeight = lines.length * lineHeight;
+    const startY = H / 2 - totalHeight / 2 + lineHeight / 2;
+
+    lines.forEach((line, i) => {
+      offCtx.fillText(line, W / 2, startY + i * lineHeight);
+    });
+
+    const imageData = offCtx.getImageData(0, 0, W * dpr, H * dpr);
+    const data = imageData.data;
+    const points = [];
+    const gap = Math.max(3, Math.floor(Math.min(W, H) / 180));
+
+    for (let y = 0; y < H * dpr; y += gap * dpr) {
+      for (let x = 0; x < W * dpr; x += gap * dpr) {
+        const idx = (y * W * dpr + x) * 4;
+        if (data[idx + 3] > 128) {
+          points.push({ x: x / dpr, y: y / dpr });
+        }
+      }
+    }
+    return points;
+  }
+
+  function initParticles() {
+    // 自适应字号
+    let fontSize;
+    if (W < 500) {
+      fontSize = Math.floor(W / 8);
+    } else if (W < 900) {
+      fontSize = Math.floor(W / 10);
+    } else {
+      fontSize = Math.floor(W / 14);
+    }
+
+    const text = "Happy\nMother's Day";
+    const points = getTextPoints(text, fontSize);
+
+    particles = points.map((p, i) => {
+      const color = colors[Math.floor(Math.random() * colors.length)];
+      return {
+        // 目标位置
+        tx: p.x,
+        ty: p.y,
+        // 当前位置（初始化时随机散布，有入场动画）
+        x: Math.random() * W,
+        y: Math.random() * H,
+        // 速度
+        vx: 0,
+        vy: 0,
+        // 属性
+        color: color,
+        size: 1.5 + Math.random() * 1.5,
+        // 浮动参数
+        floatPhase: Math.random() * Math.PI * 2,
+        floatAmpX: 0.3 + Math.random() * 0.7,
+        floatAmpY: 0.3 + Math.random() * 0.7,
+        floatSpeed: 0.008 + Math.random() * 0.012,
+        // 呼吸参数
+        breathPhase: Math.random() * Math.PI * 2,
+        breathSpeed: 0.02 + Math.random() * 0.015,
+      };
+    });
+  }
+
+  function update() {
+    time++;
+    const friction = 0.92;
+    const returnForce = 0.06;
+    const scatterForce = 15;
+    const scatterRadius = Math.min(W, H) * 0.35;
+
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+
+      // 浮动偏移
+      const floatX = Math.sin(time * p.floatSpeed + p.floatPhase) * p.floatAmpX;
+      const floatY = Math.cos(time * p.floatSpeed * 0.7 + p.floatPhase) * p.floatAmpY;
+
+      const targetX = p.tx + floatX;
+      const targetY = p.ty + floatY;
+
+      if (isPressed) {
+        // 散开逻辑
+        const dx = p.x - pointerX;
+        const dy = p.y - pointerY;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+
+        if (dist < scatterRadius) {
+          const force = (1 - dist / scatterRadius) * scatterForce;
+          p.vx += (dx / dist) * force;
+          p.vy += (dy / dist) * force;
+        }
+      }
+
+      // 弹簧回归力
+      const dx = targetX - p.x;
+      const dy = targetY - p.y;
+      p.vx += dx * returnForce;
+      p.vy += dy * returnForce;
+
+      // 摩擦力
+      p.vx *= friction;
+      p.vy *= friction;
+
+      // 更新位置
+      p.x += p.vx;
+      p.y += p.vy;
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // 全局辉光
+    ctx.shadowBlur = 0;
+    ctx.globalCompositeOperation = 'lighter';
+
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+
+      // 呼吸效果：亮度和大小脉动
+      const breath = 0.6 + 0.4 * Math.sin(time * p.breathSpeed + p.breathPhase);
+      const size = p.size * (0.8 + 0.4 * breath);
+      const alpha = 0.5 + 0.5 * breath;
+
+      const r = p.color.r;
+      const g = p.color.g;
+      const b = p.color.b;
+
+      // 外发光层
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, size * 3, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.15})`;
+      ctx.fill();
+
+      // 中间发光层
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, size * 1.8, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.35})`;
+      ctx.fill();
+
+      // 核心亮点
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      ctx.fill();
+
+      // 白芯
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, size * 0.4, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.7})`;
+      ctx.fill();
+    }
+
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function animate() {
+    update();
+    draw();
+    animId = requestAnimationFrame(animate);
+  }
+
+  // 事件处理
+  function onPointerDown(x, y) {
+    isPressed = true;
+    pointerX = x;
+    pointerY = y;
+  }
+  function onPointerMove(x, y) {
+    if (isPressed) {
+      pointerX = x;
+      pointerY = y;
+    }
+  }
+  function onPointerUp() {
+    isPressed = false;
+  }
+
+  // Mouse events
+  canvas.addEventListener('mousedown', (e) => {
+    onPointerDown(e.clientX, e.clientY);
+  });
+  canvas.addEventListener('mousemove', (e) => {
+    onPointerMove(e.clientX, e.clientY);
+  });
+  canvas.addEventListener('mouseup', onPointerUp);
+  canvas.addEventListener('mouseleave', onPointerUp);
+
+  // Touch events
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    onPointerDown(t.clientX, t.clientY);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    onPointerMove(t.clientX, t.clientY);
+  }, { passive: false });
+  canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    onPointerUp();
+  }, { passive: false });
+  canvas.addEventListener('touchcancel', onPointerUp);
+
+  // 窗口大小变化
+  window.addEventListener('resize', resize);
+
+  // 初始化
+  resize();
+  animate();
+})();
+</script>
+</body>
+</html>
